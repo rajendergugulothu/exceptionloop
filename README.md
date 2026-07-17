@@ -2,32 +2,30 @@
 
 > Operational control plane for AI agent exceptions.
 
-When AI agents escalate cases they cannot handle, those cases land in generic queues with no context, inconsistent ownership, and no systematic learning. ExceptionLoop captures complete context, classifies the exception, retrieves similar resolved cases, recommends a resolution, and converts recurring patterns into automation proposals.
+When AI agents escalate cases they cannot handle, those cases land in generic queues with no context, inconsistent ownership, and no systematic learning. ExceptionLoop captures complete context at escalation time, retrieves similar resolved cases via vector search, generates a resolution recommendation, and converts recurring patterns into automation proposals.
 
-**Status:** Sprint 1 complete — workspace management, exception intake (full API + Zendesk webhook), 11-table schema with pgvector.
+**Live:** [exceptionloop.vercel.app](https://exceptionloop.vercel.app) · [API docs](https://exceptionloop.onrender.com/docs)
 
 ---
 
 ## The problem
 
-50% of enterprises have 10+ agents in production (IDC 2025). Each agent creates its own exception category. Exception handling headcount grows with agent deployment. Human resolutions — the most valuable training signal — disappear into unstructured ticket histories.
-
-> *"My engineers ask me what the agent should handle next. I have no data. I have vibes."* — AI Product Manager, Series C SaaS
+50% of enterprises have 10+ agents in production (IDC 2025). Each agent creates its own exception category. Exception handling headcount grows linearly with agent deployment. Human resolutions — the most valuable training signal — disappear into unstructured ticket histories with no way to detect patterns or generate automation from them.
 
 ---
 
 ## How it works
 
 ```
-Exception received (webhook / API)
+Exception received (API or Zendesk webhook)
         ↓
-Classify + retrieve similar cases
+Classify + embed + retrieve similar resolved cases (pgvector)
         ↓
-Generate recommendation (after retrieval, citing source cases)
+Generate recommendation citing source cases
         ↓
 Specialist resolves in Zendesk sidebar (no tab switch)
         ↓
-Quality gate (usefulness rating → adjudication if low)
+Quality gate: usefulness rating → adjudication if low
         ↓
 Clustering + purity scoring → readiness scoring
         ↓
@@ -36,23 +34,76 @@ Workflow spec generated → exception pipeline view
 
 ---
 
-## Quick start
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14.2.5, TypeScript, App Router |
+| Auth | Clerk v5 |
+| Backend | FastAPI, SQLAlchemy 2.0 async, asyncpg |
+| Database | PostgreSQL + pgvector (hosted on Neon) |
+| Embeddings | OpenAI text-embedding-3-small (1536d) |
+| Backend hosting | Render |
+| Frontend hosting | Vercel |
+
+---
+
+## Local development
+
+### Prerequisites
+
+- Docker (for local Postgres with pgvector)
+- Python 3.11+
+- Node.js 18+
+- OpenAI API key
+- Clerk publishable key + secret key
+
+### Start the database
 
 ```bash
-# 1. Start PostgreSQL with pgvector
 docker compose up db
-
-# 2. Set up backend
-cd backend
-cp .env.example .env       # fill in API keys
-pip install -r requirements.txt
-uvicorn main:app --reload  # http://localhost:8000/docs
-
-# 3. Start frontend (Sprint 2+)
-cd frontend && npm install && npm run dev
 ```
 
-**Requires PostgreSQL with pgvector extension.** Docker image `pgvector/pgvector:pg16` has it pre-installed.
+Uses `pgvector/pgvector:pg16` which has the extension pre-installed.
+
+### Backend
+
+```bash
+cd backend
+cp .env.example .env   # fill in DATABASE_URL, OPENAI_API_KEY
+pip install -r requirements.txt
+uvicorn main:app --reload
+# API docs at http://localhost:8000/docs
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+# App at http://localhost:3000
+```
+
+---
+
+## Environment variables
+
+### Backend (`.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `OPENAI_API_KEY` | For embeddings and recommendation generation |
+| `ENVIRONMENT` | Set to `production` on Render |
+
+### Frontend (`.env.local`)
+
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | Backend URL (e.g. `https://exceptionloop.onrender.com`) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
+| `CLERK_SECRET_KEY` | From Clerk dashboard |
 
 ---
 
@@ -61,60 +112,79 @@ cd frontend && npm install && npm run dev
 ```
 exceptionloop/
 ├── backend/
-│   ├── main.py                   FastAPI app, 7 Sprint 1 routes
-│   ├── database.py               Async SQLAlchemy + pgvector init
-│   ├── models/                   11 ORM tables
+│   ├── main.py                   FastAPI app + lifespan (DB init)
+│   ├── database.py               Async SQLAlchemy engine, asyncpg SSL handling
+│   ├── models/
 │   │   ├── workspace.py
-│   │   ├── exception_case.py     Vector(1536) embedding column
-│   │   ├── resolution.py         entered_pipeline flag (quality gate)
+│   │   ├── exception_case.py     ExceptionCase with Vector(1536) embedding
+│   │   ├── resolution.py         Resolution + entered_pipeline quality gate
 │   │   ├── cluster.py            ExceptionCluster, ReadinessScore, WorkflowSpec
 │   │   └── audit.py              Append-only AuditLog
 │   ├── schemas/                  Pydantic v2 request/response models
 │   └── routers/
-│       ├── workspaces.py         POST / GET / GET /{id}
-│       └── intake.py             Full API + Zendesk webhook + case list/get
-└── frontend/                     Next.js 14 (Sprint 2+)
+│       ├── workspaces.py
+│       ├── intake.py             Full API + Zendesk webhook
+│       ├── resolutions.py
+│       ├── clusters.py
+│       └── sidebar.py            Zendesk sidebar widget data
+└── frontend/
+    ├── app/
+    │   ├── layout.tsx            ClerkProvider wrapper
+    │   ├── page.tsx              Workspace list
+    │   ├── sign-in/              Clerk sign-in page
+    │   ├── workspace/[id]/       Workspace detail + cases
+    │   ├── workspace/[id]/clusters/  Clustering kanban
+    │   ├── clusters/[id]/        Cluster detail + readiness scoring
+    │   └── sidebar/              Zendesk sidebar widget
+    ├── lib/api.ts                Typed API client
+    └── middleware.ts             Clerk auth (protects all non-public routes)
 ```
 
 ---
 
-## API endpoints (Sprint 1)
+## API endpoints
 
 ```
-POST   /workspaces/                     Create workspace
-GET    /workspaces/                     List workspaces
-GET    /workspaces/{id}                 Get workspace
-
-POST   /intake/full                     Structured intake from instrumented agent
-POST   /webhooks/zendesk/{workspace_id} Minimal intake from Zendesk webhook
-GET    /workspaces/{id}/cases           List exception cases
-GET    /cases/{id}                      Get case
-
 GET    /health
+
+POST   /workspaces/
+GET    /workspaces/
+GET    /workspaces/{id}
+
+POST   /intake/full                      Structured intake (6 fields)
+POST   /webhooks/zendesk/{workspace_id}  Minimal intake via Zendesk webhook
+GET    /workspaces/{id}/cases
+GET    /cases/{id}
+
+POST   /cases/{id}/resolve
+GET    /cases/{id}/resolution
+
+GET    /workspaces/{id}/clusters
+GET    /clusters/{id}
+
+GET    /sidebar                          Zendesk sidebar widget data
 ```
 
----
+### Two intake modes
 
-## Two intake modes
+| Mode | Source | Context richness |
+|------|--------|-----------------|
+| Full | Instrumented agent API | 100% — trigger, context, actions taken, missing info, policy ref, risk level |
+| Minimal | Zendesk webhook (fires automatically) | ~60% — customer message + escalation reason |
 
-| Mode | Source | Fields | Value |
-|------|--------|--------|-------|
-| Full | Agent API | 6 fields: trigger, context, actions, missing info, policy ref, risk | 100% |
-| Minimal | Zendesk webhook | Customer message + escalation reason | ~60% |
-
-The minimal intake mode removes the adoption blocker: specialists who don't control their agent stack can start using ExceptionLoop without any engineering work. The Zendesk webhook fires automatically when the agent creates a ticket. ExceptionLoop enriches it.
+The minimal mode removes the adoption blocker: teams that don't control their agent stack can start without any engineering work on the agent side.
 
 ---
 
 ## Key design decisions
 
-**`resolutions.entered_pipeline` is a data-layer constraint.** Low-usefulness rejections (rating ≤ 2) set this to false and route to quality review. The clustering pipeline queries `WHERE entered_pipeline = true`. No UI-level bypass is possible.
+**`resolutions.entered_pipeline` is a data-layer constraint.** Low-usefulness ratings (≤ 2) set this to `false` and route to quality review. The clustering pipeline queries `WHERE entered_pipeline = true`. No UI-level bypass is possible.
 
-**`workflow_specs.steps` is JSONB with `source_case_ids` per step.** Each generated step links to the real human resolutions that produced it. This is the automation engineer's trust condition: abstract steps without evidence are unusable.
+**`workflow_specs.steps` is JSONB with `source_case_ids` per step.** Each generated automation step links to the real human resolutions that produced it — the automation engineer's trust condition.
 
-**Embedding column is `Vector(1536)` via pgvector.** Using text-embedding-3-small (OpenAI). Stored in the same PostgreSQL instance as all other data — no additional infrastructure needed in Phase 1.
+**Vector column is `Vector(1536)` via pgvector.** Same PostgreSQL instance as all other data. No additional infrastructure required.
 
-**Zendesk webhook signature validation is per-workspace.** Each workspace can have its own `zendesk_webhook_secret`. The validation uses HMAC-SHA256. Workspaces without a secret skip validation (for development).
+**asyncpg + Neon SSL:** `sslmode` and `channel_binding` query params are stripped at runtime; SSL is passed via `connect_args={"ssl": "require"}` in production.
 
 ---
 
@@ -122,9 +192,9 @@ The minimal intake mode removes the adoption blocker: specialists who don't cont
 
 | Sprint | Scope | Status |
 |--------|-------|--------|
-| 1 | Setup, 11-table schema, intake (full + webhook) | ✅ Done |
-| 2 | Classifier, embedding service, similar-case retrieval, recommendation generator | ⬜ Next |
-| 3 | Zendesk sidebar app, specialist resolution capture, quality gate | ⬜ |
-| 4 | Clustering pipeline, purity scoring, readiness scoring | ⬜ |
-| 5 | Workflow spec generator, exception pipeline view | ⬜ |
-| 6 | End-to-end demo with Maya Okonkwo (Nexagen) | ⬜ |
+| 1 | Schema, intake (full + webhook), workspace API | ✅ Done |
+| 2 | Classifier, embedding service, similar-case retrieval, recommendation generator | ✅ Done |
+| 3 | Zendesk sidebar, resolution capture, quality gate, clustering kanban | ✅ Done |
+| 4 | Cluster detail, purity/readiness scoring, workflow spec view | ✅ Done |
+| 5 | Auth (Clerk), deployment (Neon + Render + Vercel) | ✅ Done |
+| 6 | End-to-end demo with real agent data | ⬜ Next |
