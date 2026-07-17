@@ -47,12 +47,8 @@ async def lifespan(app: FastAPI):
     logger.info("Starting ExceptionLoop API (env=%s)", APP_ENV)
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        if not IS_PROD:
-            # Auto-create tables in dev. In production, run Alembic migrations.
-            await conn.run_sync(Base.metadata.create_all)
-            logger.info("Dev: tables verified via create_all")
-        else:
-            logger.info("Production: skipping create_all — run migrations manually")
+        await conn.run_sync(Base.metadata.create_all)
+        logger.info("Tables verified via create_all")
     yield
     await engine.dispose()
     logger.info("ExceptionLoop API shutdown complete")
