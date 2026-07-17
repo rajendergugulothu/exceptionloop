@@ -29,35 +29,7 @@
 
 ## How It Works
 
-```
-  Exception received (API or Zendesk webhook)
-              │
-              ▼
-  Classify + embed → retrieve similar resolved cases (pgvector) ───────
-              │                                                         │
-              ▼                                                         │
-  Recommendation generated citing source cases                         │
-              │                                                         │
-              ▼                                                         │
-  Specialist resolves in Zendesk sidebar — no tab switch               │
-              │                                                         │
-              ▼                                                         │
-  Quality gate: usefulness rating (1–5)                                │
-              │                                                         │
-    ┌─────────┴──────────┐                                             │
-    │ Rating ≥ 3         │ Rating ≤ 2                                  │
-    ▼                    ▼                                             │
-  entered_pipeline=true  Manager adjudication queue                    │
-    │                                                                  │
-    ▼                                                                  │
-  Clustering + purity scoring (≥80% agreement required)               │
-              │                                                         │
-              ▼                                                         │
-  8-dimension readiness scoring → workflow spec generated ─────────────┘
-              │
-              ▼
-  Exception pipeline: candidates → approved → in development → shipped
-```
+![ExceptionLoop flow](docs/flow.png)
 
 ---
 
