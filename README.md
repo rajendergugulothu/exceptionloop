@@ -93,7 +93,9 @@ ExceptionLoop is the second project in an AI operations portfolio. The first, [P
 | **Output** | Launch-readiness report | Automation pipeline |
 | **North Star** | % decisions proven safe before prod | % recurring exceptions converted to automation |
 
-Phase 0 discovery: 8 synthetic user research interviews and a manual concierge test on 47 real exception cases from a production returns agent. The concierge test found that 40% of all escalations over 2 weeks were a single recurring pattern — the loyalty points refund split — present for 4 months without being identified or automated.
+ExceptionLoop was developed using secondary market research, structured persona simulations, a 47-case concierge dataset, and founder-led product evaluations. The project has not yet been validated with production customers — the current evidence supports MVP feasibility rather than market demand.
+
+The concierge dataset included a simulated returns-agent scenario where 40% of escalations over a 2-week period were a single recurring pattern — the loyalty points refund split — present for 4 months without being identified or automated. This was used to test whether the clustering and readiness pipeline could surface automatable patterns from realistic exception data.
 
 ---
 
