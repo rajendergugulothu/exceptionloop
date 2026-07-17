@@ -6,6 +6,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/exceptionloop")
+# Neon/Render/Heroku supply postgresql:// — rewrite to asyncpg driver
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 APP_ENV = os.getenv("APP_ENV", "development")
 IS_PROD = APP_ENV == "production"
 
