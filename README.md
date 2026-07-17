@@ -143,44 +143,6 @@ GET    /workspaces/{id}/pipeline           Exception pipeline kanban view
 
 ---
 
-## Local development
-
-**Prerequisites:** Docker, Python 3.11+, Node.js 18+, OpenAI API key, Clerk account
-
-```bash
-# Start PostgreSQL with pgvector
-docker compose up db
-
-# Backend
-cd backend
-cp .env.example .env       # fill in DATABASE_URL, OPENAI_API_KEY
-pip install -r requirements.txt
-uvicorn main:app --reload  # http://localhost:8000/docs
-
-# Frontend
-cd frontend
-npm install
-npm run dev                # http://localhost:3000
-```
-
-### Environment variables
-
-**Backend (`.env`):**
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string (use `pgvector/pgvector:pg16` image) |
-| `OPENAI_API_KEY` | For text-embedding-3-small |
-| `ANTHROPIC_API_KEY` | For classification and recommendation generation |
-
-**Frontend (`.env.local`):**
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Backend URL |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
-| `CLERK_SECRET_KEY` | From Clerk dashboard |
-
----
-
 ## Sprint roadmap
 
 | Sprint | Scope | Status |
