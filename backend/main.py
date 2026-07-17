@@ -45,8 +45,16 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting ExceptionLoop API (env=%s)", APP_ENV)
+    # Enable pgvector — Neon has it pre-installed, ignore if already exists
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            logger.info("pgvector extension ready")
+    except Exception as e:
+        logger.warning("pgvector extension skipped: %s", e)
+
+    # Create all tables
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Tables verified via create_all")
     yield
