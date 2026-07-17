@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import { api, type Workspace } from "@/lib/api";
 
 export default function Home() {
@@ -60,8 +61,11 @@ export default function Home() {
         </div>
 
         <div className="sidebar-bottom">
-          <div style={{ fontSize: 11, color: "var(--text-3)", padding: "0 6px" }}>
-            {workspaces.length} workspace{workspaces.length !== 1 ? "s" : ""} · {totalExceptions} exceptions
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", padding: "0 6px" }}>
+              {workspaces.length} workspace{workspaces.length !== 1 ? "s" : ""} · {totalExceptions} exceptions
+            </div>
+            <UserButton afterSignOutUrl="/sign-in" />
           </div>
         </div>
       </aside>
