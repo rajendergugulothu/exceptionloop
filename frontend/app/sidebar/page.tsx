@@ -1,4 +1,5 @@
 "use client";
+import { Suspense } from "react";
 /**
  * Zendesk Sidebar Simulation
  *
@@ -24,7 +25,7 @@ import { api, type ExceptionCase, type SimilarCase, type Recommendation } from "
 
 type Phase = "loading" | "ready" | "enriching" | "resolved" | "error";
 
-export default function SidebarPage() {
+function SidebarContent() {
   const params = useSearchParams();
   const caseId = params.get("case_id");
   const workspaceId = params.get("workspace_id");
@@ -395,5 +396,13 @@ export default function SidebarPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SidebarPage() {
+  return (
+    <Suspense fallback={<div className="sidebar-widget" style={{ padding: 24, color: "var(--text-2)" }}>Loading…</div>}>
+      <SidebarContent />
+    </Suspense>
   );
 }
