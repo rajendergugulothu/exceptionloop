@@ -151,7 +151,7 @@ export default function ClusterDetailPage() {
                   {Object.entries(DIM_LABELS).map(([key, label]) => (
                     <div key={key}>
                       <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>{label}</div>
-                      <ScoreBar value={(readiness as Record<string, number | null>)[key] as number | null} />
+                      <ScoreBar value={(readiness as unknown as Record<string, number | null>)[key] ?? null} />
                     </div>
                   ))}
                 </div>
