@@ -2,15 +2,37 @@
 
 > Operational control plane for AI agent exceptions.
 
-When AI agents escalate cases they cannot handle, those cases land in generic queues with no context, inconsistent ownership, and no systematic learning. ExceptionLoop captures complete context at escalation time, retrieves similar resolved cases via vector search, generates a resolution recommendation, and converts recurring patterns into automation proposals.
+**Live: [exceptionloop.vercel.app](https://exceptionloop.vercel.app) &nbsp;·&nbsp; [API docs](https://exceptionloop.onrender.com/docs)**
 
-**Live:** [exceptionloop.vercel.app](https://exceptionloop.vercel.app) · [API docs](https://exceptionloop.onrender.com/docs)
+---
+
+When AI agents escalate cases they cannot handle, those cases land in generic queues with no context, no ownership, and no way to learn from them. ExceptionLoop captures complete context at escalation time, retrieves similar resolved cases via vector search, generates a resolution recommendation, and converts recurring patterns into automation proposals.
+
+---
+
+## Screenshots
+
+### Workspace list
+![Workspace list](docs/workspaces.png)
+
+Each workspace monitors one AI agent deployment. The QuickCommerce Returns Agent has 9 exceptions in flight — visible from the moment the workspace loads.
+
+### Exception queue and dashboard
+![Exception queue](docs/dashboard.png)
+
+Volume by severity, open / critical / resolved counts, and the live exception queue with real customer messages and exception type tags. Specialists see actual customer language — not category labels.
 
 ---
 
 ## The problem
 
-50% of enterprises have 10+ agents in production (IDC 2025). Each agent creates its own exception category. Exception handling headcount grows linearly with agent deployment. Human resolutions — the most valuable training signal — disappear into unstructured ticket histories with no way to detect patterns or generate automation from them.
+50% of enterprises have 10+ agents in production (IDC 2025). Each new agent creates a new exception category. Exception handling headcount grows with agent deployment. Human resolutions — the most valuable training signal an organization has — disappear into unstructured ticket histories.
+
+> *"My engineers ask me what the agent should handle next. I have no data. I have vibes."*
+> — AI Product Manager, Series C SaaS (discovery interview)
+
+> *"I solve the same problems every week. But every time I see one, I start from scratch."*
+> — Exception Operations Specialist (design partner)
 
 ---
 
@@ -23,13 +45,15 @@ Classify + embed + retrieve similar resolved cases (pgvector)
         ↓
 Generate recommendation citing source cases
         ↓
-Specialist resolves in Zendesk sidebar (no tab switch)
+Specialist resolves in Zendesk sidebar — no tab switch required
         ↓
 Quality gate: usefulness rating → adjudication if low
         ↓
-Clustering + purity scoring → readiness scoring
+Clustering + purity scoring (≥80% agreement required)
         ↓
-Workflow spec generated → exception pipeline view
+8-dimension readiness scoring → workflow spec generated
+        ↓
+Exception pipeline: candidates → approved → in development → shipped
 ```
 
 ---
@@ -38,107 +62,54 @@ Workflow spec generated → exception pipeline view
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14.2.5, TypeScript, App Router |
+| Frontend | Next.js 14, TypeScript, App Router |
 | Auth | Clerk v5 |
 | Backend | FastAPI, SQLAlchemy 2.0 async, asyncpg |
-| Database | PostgreSQL + pgvector (hosted on Neon) |
+| Database | PostgreSQL + pgvector hosted on Neon |
 | Embeddings | OpenAI text-embedding-3-small (1536d) |
+| LLM | Anthropic Claude (classification, recommendations, readiness scoring) |
 | Backend hosting | Render |
 | Frontend hosting | Vercel |
 
 ---
 
-## Local development
+## Key design decisions
 
-### Prerequisites
+**Recommendation generated after retrieval — always.** The recommendation service receives similar cases as a parameter and cannot run without them. This prevents anchoring bias: specialists read similar cases before the AI output, not after. Confirmed as a hard requirement in the first design partner working session.
 
-- Docker (for local Postgres with pgvector)
-- Python 3.11+
-- Node.js 18+
-- OpenAI API key
-- Clerk publishable key + secret key
+**`entered_pipeline` is a data-layer constraint.** Low-usefulness rejections (rating ≤ 2) set this to `false` and route to manager adjudication. The clustering pipeline queries `WHERE entered_pipeline = true`. No UI-level bypass is possible — bad feedback cannot contaminate the learning pipeline regardless of how the API is called.
 
-### Start the database
+**`workflow_specs.steps` is JSONB with `source_case_ids` per step.** Each generated automation step links to the real human resolutions that produced it. Abstract steps without evidence citations are unusable by automation engineers — this is enforced in the data model.
 
-```bash
-docker compose up db
-```
+**Cluster purity ≥ 80% before readiness scoring.** Prevents readiness scoring from being applied to heterogeneous clusters with hidden variance. A cluster that scores 90% ready but contains 30% different root patterns creates silent automation failures after deployment.
 
-Uses `pgvector/pgvector:pg16` which has the extension pre-installed.
-
-### Backend
-
-```bash
-cd backend
-cp .env.example .env   # fill in DATABASE_URL, OPENAI_API_KEY
-pip install -r requirements.txt
-uvicorn main:app --reload
-# API docs at http://localhost:8000/docs
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# App at http://localhost:3000
-```
+**Usefulness rating measures retrieval quality, not recommendation quality.** When rejecting a recommendation, specialists rate whether the similar cases shown were relevant (1–5) — not whether the recommendation was good. This is the signal the embedding/retrieval system can actually improve on.
 
 ---
 
-## Environment variables
+## Two intake modes
 
-### Backend (`.env`)
+| Mode | Source | Context | Value |
+|------|--------|---------|-------|
+| Full | Instrumented agent API | 6 fields: trigger, context, attempted actions, missing info, policy ref, risk level | 100% |
+| Minimal | Zendesk webhook (fires automatically on ticket creation) | Customer message + escalation reason | ~60% |
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `OPENAI_API_KEY` | For embeddings and recommendation generation |
-| `ENVIRONMENT` | Set to `production` on Render |
-
-### Frontend (`.env.local`)
-
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Backend URL (e.g. `https://exceptionloop.onrender.com`) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
-| `CLERK_SECRET_KEY` | From Clerk dashboard |
+The minimal intake mode removes the adoption blocker for teams that don't control their agent stack. Any Zendesk customer can start using ExceptionLoop without filing an engineering ticket.
 
 ---
 
-## Project structure
+## Automation-readiness model (8 dimensions)
 
-```
-exceptionloop/
-├── backend/
-│   ├── main.py                   FastAPI app + lifespan (DB init)
-│   ├── database.py               Async SQLAlchemy engine, asyncpg SSL handling
-│   ├── models/
-│   │   ├── workspace.py
-│   │   ├── exception_case.py     ExceptionCase with Vector(1536) embedding
-│   │   ├── resolution.py         Resolution + entered_pipeline quality gate
-│   │   ├── cluster.py            ExceptionCluster, ReadinessScore, WorkflowSpec
-│   │   └── audit.py              Append-only AuditLog
-│   ├── schemas/                  Pydantic v2 request/response models
-│   └── routers/
-│       ├── workspaces.py
-│       ├── intake.py             Full API + Zendesk webhook
-│       ├── resolutions.py
-│       ├── clusters.py
-│       └── sidebar.py            Zendesk sidebar widget data
-└── frontend/
-    ├── app/
-    │   ├── layout.tsx            ClerkProvider wrapper
-    │   ├── page.tsx              Workspace list
-    │   ├── sign-in/              Clerk sign-in page
-    │   ├── workspace/[id]/       Workspace detail + cases
-    │   ├── workspace/[id]/clusters/  Clustering kanban
-    │   ├── clusters/[id]/        Cluster detail + readiness scoring
-    │   └── sidebar/              Zendesk sidebar widget
-    ├── lib/api.ts                Typed API client
-    └── middleware.ts             Clerk auth (protects all non-public routes)
-```
+| Dimension | Question |
+|-----------|----------|
+| Frequency | Does this exception occur often enough to justify automation? |
+| Resolution consistency | Do humans solve it with the same steps? |
+| Data completeness | Are required inputs reliably available? |
+| Risk | What is the consequence of an incorrect automated action? |
+| Reversibility | Can the action be undone quickly? |
+| Policy clarity | Is the expected behavior explicitly defined? |
+| Integration stability | Are required systems dependable? |
+| Evaluation feasibility | Can correct outcomes be measured objectively? |
 
 ---
 
@@ -151,40 +122,62 @@ POST   /workspaces/
 GET    /workspaces/
 GET    /workspaces/{id}
 
-POST   /intake/full                      Structured intake (6 fields)
-POST   /webhooks/zendesk/{workspace_id}  Minimal intake via Zendesk webhook
+POST   /intake/full                        Structured intake (6 fields)
+POST   /webhooks/zendesk/{workspace_id}    Minimal intake via Zendesk webhook
 GET    /workspaces/{id}/cases
 GET    /cases/{id}
 
 POST   /cases/{id}/resolve
-GET    /cases/{id}/resolution
+POST   /cases/{id}/flag-new-pattern        One-click new pattern flag → AI PM queue
+GET    /workspaces/{id}/quality-reviews
+POST   /quality-reviews/{id}/adjudicate
 
+POST   /workspaces/{id}/cluster            Run clustering pipeline
 GET    /workspaces/{id}/clusters
-GET    /clusters/{id}
-
-GET    /sidebar                          Zendesk sidebar widget data
+POST   /clusters/{id}/purity-review        Human purity assessment
+POST   /clusters/{id}/score-readiness      8-dimension readiness scoring
+POST   /clusters/{id}/generate-spec        Generate workflow specification
+POST   /specs/{id}/advance                 Advance pipeline stage
+GET    /workspaces/{id}/pipeline           Exception pipeline kanban view
 ```
-
-### Two intake modes
-
-| Mode | Source | Context richness |
-|------|--------|-----------------|
-| Full | Instrumented agent API | 100% — trigger, context, actions taken, missing info, policy ref, risk level |
-| Minimal | Zendesk webhook (fires automatically) | ~60% — customer message + escalation reason |
-
-The minimal mode removes the adoption blocker: teams that don't control their agent stack can start without any engineering work on the agent side.
 
 ---
 
-## Key design decisions
+## Local development
 
-**`resolutions.entered_pipeline` is a data-layer constraint.** Low-usefulness ratings (≤ 2) set this to `false` and route to quality review. The clustering pipeline queries `WHERE entered_pipeline = true`. No UI-level bypass is possible.
+**Prerequisites:** Docker, Python 3.11+, Node.js 18+, OpenAI API key, Clerk account
 
-**`workflow_specs.steps` is JSONB with `source_case_ids` per step.** Each generated automation step links to the real human resolutions that produced it — the automation engineer's trust condition.
+```bash
+# Start PostgreSQL with pgvector
+docker compose up db
 
-**Vector column is `Vector(1536)` via pgvector.** Same PostgreSQL instance as all other data. No additional infrastructure required.
+# Backend
+cd backend
+cp .env.example .env       # fill in DATABASE_URL, OPENAI_API_KEY
+pip install -r requirements.txt
+uvicorn main:app --reload  # http://localhost:8000/docs
 
-**asyncpg + Neon SSL:** `sslmode` and `channel_binding` query params are stripped at runtime; SSL is passed via `connect_args={"ssl": "require"}` in production.
+# Frontend
+cd frontend
+npm install
+npm run dev                # http://localhost:3000
+```
+
+### Environment variables
+
+**Backend (`.env`):**
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (use `pgvector/pgvector:pg16` image) |
+| `OPENAI_API_KEY` | For text-embedding-3-small |
+| `ANTHROPIC_API_KEY` | For classification and recommendation generation |
+
+**Frontend (`.env.local`):**
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | Backend URL |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | From Clerk dashboard |
+| `CLERK_SECRET_KEY` | From Clerk dashboard |
 
 ---
 
@@ -192,9 +185,32 @@ The minimal mode removes the adoption blocker: teams that don't control their ag
 
 | Sprint | Scope | Status |
 |--------|-------|--------|
-| 1 | Schema, intake (full + webhook), workspace API | ✅ Done |
-| 2 | Classifier, embedding service, similar-case retrieval, recommendation generator | ✅ Done |
-| 3 | Zendesk sidebar, resolution capture, quality gate, clustering kanban | ✅ Done |
-| 4 | Cluster detail, purity/readiness scoring, workflow spec view | ✅ Done |
-| 5 | Auth (Clerk), deployment (Neon + Render + Vercel) | ✅ Done |
-| 6 | End-to-end demo with real agent data | ⬜ Next |
+| 1 | Schema (11 tables + pgvector), intake API + Zendesk webhook | ✅ |
+| 2 | Classifier, embedding service, similar-case retrieval, recommendation generator | ✅ |
+| 3 | Zendesk sidebar, resolution capture, quality gate, clustering pipeline | ✅ |
+| 4 | Purity scoring, readiness scoring, workflow spec generator, pipeline view | ✅ |
+| 5 | Auth (Clerk), deployment (Neon + Render + Vercel) | ✅ |
+| 6 | End-to-end demo with real agent data | ⬜ |
+
+---
+
+## Portfolio context
+
+ExceptionLoop is the second project in an AI operations portfolio. The first, [PolicyLens AI](https://github.com/rajendergugulothu/policylens-ai), tests agents against policy before deployment. ExceptionLoop manages what breaks after deployment.
+
+Together they cover the full AI agent operations lifecycle:
+
+| | PolicyLens AI | ExceptionLoop |
+|--|--------------|---------------|
+| **When** | Before deployment | After deployment |
+| **What** | Tests agents against policy | Manages escalations + learns from them |
+| **Output** | Launch-readiness report | Automation pipeline |
+| **North Star** | % decisions proven safe before prod | % recurring exceptions converted to automation |
+
+Phase 0 discovery included 8 synthetic user research interviews and a manual concierge test on 47 real exception cases from a production returns agent. The concierge test found that 40% of all escalations over a 2-week period were a single recurring pattern — the loyalty points refund split — that had been present for 4 months without being identified or automated.
+
+---
+
+## License
+
+MIT
